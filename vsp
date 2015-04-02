@@ -76,7 +76,7 @@ for ((i=1; i<=$u_length; i++))
                 killall notify-osd
             fi
                 notify-send "dumping ${title-dump}-$i of $u_length"
-                wget -c -U "$UA" -O "$HOME/Videos/${title-dump}/${title-dump}-$i" "$uri"
+                wget -c -T 60s -U "$UA" -O "$HOME/Videos/${title-dump}/${title-dump}-$i" "$uri"
         done
 
 if [ $u_length -eq 1 ]; then
