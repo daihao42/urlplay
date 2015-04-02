@@ -1,0 +1,188 @@
+
+#!/bin/bash
+# Thanks to <!-- m --><a class="postlink" href="http://www.flvcd.com">http://www.flvcd.com</a><!-- m -->
+
+# usage: vsplay [play|dump|test] [url] [fmt]
+# One can [test] this script with certain url to make it work better
+
+# example: vsplay play <!-- m --><a class="postlink" href="http://v.youku.com/v_show/id_XMzAwMjI3MDI0.html">http://v.youku.com/v_show/id_XMzAwMjI3MDI0.html</a><!-- m -->
+
+# fmt could be: 'normal', 'high', 'super', 'super2' or 'real'(without the quotation mark),
+# denoting 260p, 360p, 480p, 720p and the original image respectively, yet depending on the stream source.
+# Leaving it blank leads to the default video quality provided by flvcd.
+
+Preset(){
+
+	_P26=$(sed -n '/260P版解析/p' "/tmp/dump" |sed 's/<a href="*//g' |sed 's/"><font color="red"><B>260P版解析<\/B><\/font><\/a>//g' |sed 's/^[ ]*//g')
+	_P36=$(sed -n '/360P版解析/p' "/tmp/dump" |sed 's/<a href="*//g' |sed 's/"><font color="red"><B>360P版解析<\/B><\/font><\/a>//g' |sed 's/^[ ]*//g')
+	_P48=$(sed -n '/480P版解析/p' "/tmp/dump" |sed 's/<a href="*//g' |sed 's/"><font color="red"><B>480P版解析<\/B><\/font><\/a>//g' |sed 's/^[ ]*//g')
+	_P72=$(sed -n '/720P版解析/p' "/tmp/dump" |sed 's/<a href="*//g' |sed 's/"><font color="red"><B>720P版解析<\/B><\/font><\/a>//g' |sed 's/^[ ]*//g')
+	_P00=$(sed -n '/原画版解析/p' "/tmp/dump" |sed 's/<a href="*//g' |sed 's/"><font color="red"><B>原画版解析<\/B><\/font><\/a>//g' |sed 's/^[ ]*//g')
+
+	[ -n "${_P26}" ] && _fmt0="FALSE 260P"
+	[ -n "${_P36}" ] && _fmt1="TRUE 360P"
+	[ -n "${_P48}" ] && _fmt2="FALSE 480P"
+	[ -n "${_P72}" ] && _fmt3="FALSE 720P"
+	[ -n "${_P00}" ] && _fmt4="FALSE 原画"
+
+}
+
+get_url() {
+	sed -ne 's/^.*href="//;/onclick/ s/" target.*$//p' /tmp/dump >/tmp/url
+	
+	if echo "$wurl" |grep "tv.sohu.com" >/dev/null ; then
+		sed -i 's/^.*&new=/http:\/\/newflv.sohu.ccgslb.net/g' /tmp/url
+	fi
+}
+
+get_title() {
+	sed -ne  's/" + ".*$//; /document\.title/ s/^.*"//p' /tmp/dump >/tmp/title
+}
+
+make_playlist() {
+
+	mkdir -p /tmp/playlists
+	for ((i=1; i<=$u_length; ++i))
+	do
+            	ttl=`sed -n "$i p" /tmp/title`
+            	sed -i "$((2*i-1)) i #EXTINF:PART $i in $u_length, $ttl" /tmp/url
+      	done
+	sed -i "1i#EXTM3U" /tmp/url
+   	mv /tmp/url "/tmp/playlists/${title}.m3u"
+}
+
+
+# script to play the stream
+play() {
+    ##notify-send "playing ${title}"
+	if [ -s "/tmp/playlists/${title}.m3u" ]; then
+   		mplayer -user-agent "$UA" -playlist  "/tmp/playlists/${title}.m3u" -title "${title}"
+	elif [ -s /tmp/url ]; then
+   		mv /tmp/url "/tmp/playlists/${title-dump}.url" # in case title is null.
+		mplayer -user-agent "$UA" -playlist "/tmp/playlists/${title-dump}.url" -title "${title}"
+	fi
+}
+
+# script to download the stream
+dump(){
+
+mkdir -p "$HOME/Videos/${title-dump}"
+
+for ((i=1; i<=$u_length; i++))
+        do
+            uri=$(sed -n "$i p" /tmp/url)
+            if pgrep notify-osd |grep '[0-9]'>/dev/null
+            then
+                killall notify-osd
+            fi
+                notify-send "dumping ${title-dump}-$i of $u_length"
+                wget -c -U "$UA" -O "$HOME/Videos/${title-dump}/${title-dump}-$i" "$uri"
+        done
+
+if [ $u_length -eq 1 ]; then
+    mv "$HOME/Videos/${title-dump}/${title-dump}-1" "$HOME/Videos/${title-dump}/${title-dump}"
+fi
+
+}
+
+
+# ==============================================
+# =========== work starts here =================
+# ==============================================
+case "$1" in
+usage)
+   ## notify-send "Usage:" "vsplay [play|dump|test|usage] [url] [normal|high|super|real]" &&    
+	exit 0
+;;
+esac
+
+##if [[ "$1" != "play"  &&   "$1" != "dump"  &&  "$1" != "test" ]] ; then
+##    notify-send "Obsolute action designated." "Usage: vsplay [action] [url] [fmt]" && exit 1
+##fi
+
+wurl=$(urlencode "$2") # target url
+fmt=$3 # video format
+UA="Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; Trident/5.0)" # fake user-agent
+parser="http://www.flvcd.com/parse.php?flag=&format=$fmt&kw=$wurl&sbt=%BF%AA%CA%BCGO%21" # flvcd default
+
+
+if ! wget $parser -q -U "$UA" -O /tmp/dump; then
+##   	notify-send "cannot parser, exit"
+	exit 0
+else iconv -f gbk -t utf-8 /tmp/dump -o /tmp/dump
+fi
+
+if [ -z "$3"] ; then
+
+	Preset
+
+	if [[ -n "${_fmt0}" || -n "${_fmt1}" || -n "${_fmt2}" || -n "${_fmt3}" || -n "${_fmt4}" ]]; then
+
+		qual=$(zenity --text="选择要使用的视频格式" --title="" --list --cancel-label 当前值 --ok-label 选定值 --hide-header --radiolist --column "" --column "" ${_fmt0} ${_fmt1} ${_fmt2} ${_fmt3} ${_fmt4})
+
+		[ "$qual" = "260P" ] && fmt=normal
+		[ "$qual" = "360P" ] && fmt=high
+		[ "$qual" = "480P" ] && fmt=super
+		[ "$qual" = "720P" ] && fmt=super2
+		[ "$qual" = "原画" ] && fmt=real
+
+	fi
+fi
+
+if [ -n "$qual" ]; then
+	newparser="http://www.flvcd.com/parse.php?flag=&format=$fmt&kw=$wurl&sbt=%BF%AA%CA%BCGO%21"
+	wget $newparser -q -U "$UA" -O /tmp/dump
+	iconv -f gbk -t utf-8 /tmp/dump -o /tmp/dump
+fi
+
+
+get_url
+
+get_title
+
+u_length=`cat /tmp/url |wc -l`
+t_length=`cat /tmp/title |wc -l`
+
+if [ $u_length -eq 0 ]; then
+##        notify-send "stream url is null, exit"
+        exit 0
+fi
+
+if [ $t_length -eq 1 ] ; then
+    title=$(cat /tmp/title)
+elif [$t_length -gt 1]; then
+    title=$(sed  -n '1s/-[0-9]\+$//'p /tmp/title)
+fi
+
+
+case "$1" in 
+
+play)
+
+if [ $u_length -eq $t_length ]; then
+   	make_playlist
+##else
+##   	notify-send "u_length and t_length not match, no playlist generated."
+fi
+
+if ! play ; then
+   	echo "can not play, check the url's in /tmp/playlists"
+	exit 1
+fi
+;;
+
+dump)
+
+if ! dump ; then
+	echo "dump failed, check the url's in /tmp/url"
+	exit 1
+fi
+;;
+
+test)
+
+	notify-send "OK" "$u_length url items, $t_length title items."
+;;
+
+esac
+
